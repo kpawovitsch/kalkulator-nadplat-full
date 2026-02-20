@@ -35,11 +35,6 @@
     .warn{color:var(--warn)}
     .bad{color:var(--bad)}
     .hidden{display:none !important;}
-    .mini-box{
-      margin-top:10px;padding:10px 12px;border:1px solid rgba(255,255,255,.08);
-      background:#0f1217;border-radius:10px;font-size:12px;color:var(--muted);line-height:1.35;
-    }
-    .mini-box .line{margin:2px 0}
     @media (max-width:900px){.span-6{grid-column:span 12}}
   </style>
 </head>
@@ -70,29 +65,9 @@
             <input id="startDate" type="date" value="" />
           </div>
           <div>
-            <label>Roczna stopa (%)</label>
+            <label>Roczna stopa (%) <span class="muted">(nominalna)</span></label>
             <input id="rYear" type="number" step="0.0001" value="" placeholder="np. 14.49" />
           </div>
-        </div>
-
-        <div class="row" style="margin-top:12px">
-          <div>
-            <label>Typ stopy</label>
-            <select id="rateType">
-              <option value="nominal">Nominalna (najczęściej w banku)</option>
-              <option value="effective">Efektywna</option>
-            </select>
-          </div>
-          <div>
-            <label>Miesięczna stopa modelowa</label>
-            <input id="monthlyRatePreview" type="text" disabled value="—" />
-          </div>
-        </div>
-
-        <div class="mini-box" id="paymentCheckBox">
-          <div class="line">Rata modelowa: —</div>
-          <div class="line">Wpisana rata: —</div>
-          <div class="line">Różnica: —</div>
         </div>
 
         <div id="modeSection" style="margin-top:12px">
@@ -144,8 +119,8 @@
 
         <p class="note" style="margin-top:10px">
           Tryb „skrócenie okresu”: rata podstawowa zostaje stała, nadpłaty skracają czas spłaty.<br>
-          Tryb „obniżenie raty”: okres pozostaje stały, a rata jest przeliczana po każdej nadpłacie.
-          <span class="warn">Symulacja bankowa może różnić się detalami (zaokrąglenia, dni w miesiącu, moment przeliczenia, odsetki dzienne, dodatkowe koszty w racie).</span>
+          Tryb „obniżenie raty”: najbliższa rata pozostaje jak wpisana, a kolejne raty są przeliczane przy zachowaniu okresu.
+          <span class="warn">To podgląd/symulacja — bank może liczyć nieco inaczej (zaokrąglenia, dni w miesiącu, odsetki dzienne, moment przeliczenia).</span>
         </p>
       </div>
 
@@ -189,9 +164,6 @@ function fmt(n){
   return (isNaN(n) ? '—' : n.toLocaleString('pl-PL',{minimumFractionDigits:2,maximumFractionDigits:2})) + ' PLN';
 }
 function fmtN(n){ return isFinite(n) ? Math.round(n) : '—'; }
-function fmtPct(n){
-  return isFinite(n) ? (n*100).toLocaleString('pl-PL',{minimumFractionDigits:4,maximumFractionDigits:4}) + '%' : '—';
-}
 
 function parseDateInput(id){
   const v = document.getElementById(id).value;
@@ -209,15 +181,10 @@ function monthsBetweenInclusive(startDate, endDate){
   return diff + 1;
 }
 
-function calcMonthlyRateFromInput(yearRatePct, rateType){
+// Roczna nominalna -> miesięczna (uproszczenie modelowe)
+function calcMonthlyRateFromNominal(yearRatePct){
   const annual = Number(yearRatePct) / 100;
-  if (!isFinite(annual)) return NaN;
-  if (annual < 0) return NaN;
-
-  if (rateType === 'effective') {
-    return Math.pow(1 + annual, 1/12) - 1;
-  }
-  // nominalna (domyślnie): prosty podział przez 12
+  if (!isFinite(annual) || annual < 0) return NaN;
   return annual / 12;
 }
 
@@ -233,6 +200,7 @@ function hasMinimumInputs(){
   const rYear = document.getElementById('rYear').value;
   const mode = document.getElementById('mode').value;
   const endDate = document.getElementById('endDate').value;
+
   if (String(P).trim() === '' || String(PMT).trim() === '' || String(rYear).trim() === '') return false;
   if (mode === 'lower' && String(endDate).trim() === '') return false;
   return true;
@@ -275,6 +243,9 @@ function amortizeShorten({P, PMT, r, extra=0, lump=0, lumpMonth=1, maxMonths=480
   return {months:m, totalInterest:totalInt, rows};
 }
 
+// Tryb "obniżenie raty":
+// - rata w 1. miesiącu zostaje taka jak wpisana przez użytkownika (PMT)
+// - od 2. miesiąca rata jest przeliczana
 function amortizeLowerPayment({P, PMT, r, remainingMonths, extra=0, lump=0, lumpMonth=1}){
   let bal = Number(P);
   let totalInt = 0;
@@ -293,8 +264,9 @@ function amortizeLowerPayment({P, PMT, r, remainingMonths, extra=0, lump=0, lump
     const interest = bal * r;
     const extraLump = (m === Number(lumpMonth) ? Number(lump) : 0);
 
+    // Najbliższa rata = wpisana przez użytkownika. Kolejne raty przeliczamy.
     const recalculatedPMT = calcAnnuityPayment(start, r, nLeftThisMonth);
-    const pmtCandidate = Math.max(0, recalculatedPMT);
+    const pmtCandidate = (m === 1) ? Number(PMT) : Math.max(0, recalculatedPMT);
 
     const needPrincipalNoLump = Math.max(start - extraLump, 0);
     const maxNeededNoLump = interest + needPrincipalNoLump;
@@ -385,8 +357,7 @@ function getInputs(){
   const PMT = parseFloat(document.getElementById('PMT').value || '0');
 
   const rYear = parseFloat(document.getElementById('rYear').value || '0');
-  const rateType = document.getElementById('rateType').value;
-  const r = calcMonthlyRateFromInput(rYear, rateType);
+  const r = calcMonthlyRateFromNominal(rYear);
 
   const startDate = parseDateInput('startDate');
   const endDate = parseDateInput('endDate');
@@ -399,7 +370,7 @@ function getInputs(){
   let remainingMonths = null;
   if (startDate && endDate) remainingMonths = monthsBetweenInclusive(startDate, endDate);
 
-  return {P, PMT, rYear, rateType, r, startDate, endDate, remainingMonths, mode, extra, lump, lumpMonth};
+  return {P, PMT, rYear, r, startDate, endDate, remainingMonths, mode, extra, lump, lumpMonth};
 }
 
 function enableExport(rows, startDate){
@@ -435,85 +406,6 @@ function updateModeUI(){
 
   updateDateRangeHint();
   updateLumpMonthHint();
-  updatePaymentCheckBox();
-}
-
-function updateMonthlyRatePreview(){
-  const rYearVal = parseFloat(document.getElementById('rYear').value || '');
-  const rateType = document.getElementById('rateType').value;
-  const monthly = calcMonthlyRateFromInput(rYearVal, rateType);
-
-  const field = document.getElementById('monthlyRatePreview');
-  if (!isFinite(monthly)) {
-    field.value = '—';
-    return;
-  }
-  field.value = fmtPct(monthly);
-}
-
-function updatePaymentCheckBox(){
-  const box = document.getElementById('paymentCheckBox');
-  const P = parseFloat(document.getElementById('P').value || '');
-  const PMT = parseFloat(document.getElementById('PMT').value || '');
-  const rYear = parseFloat(document.getElementById('rYear').value || '');
-  const rateType = document.getElementById('rateType').value;
-  const startDate = parseDateInput('startDate');
-  const endDate = parseDateInput('endDate');
-  const mode = document.getElementById('mode').value;
-  const r = calcMonthlyRateFromInput(rYear, rateType);
-
-  if (!isFinite(P) || !isFinite(PMT) || !isFinite(r) || P <= 0 || PMT <= 0 || r < 0) {
-    box.innerHTML = '<div class="line">Rata modelowa: —</div><div class="line">Wpisana rata: —</div><div class="line">Różnica: —</div>';
-    return;
-  }
-
-  let nModel = null;
-
-  if (mode === 'lower') {
-    if (startDate && endDate) {
-      try { nModel = monthsBetweenInclusive(startDate, endDate); } catch(_) {}
-    }
-  } else {
-    // Dla trybu skrócenia okresu wyliczamy modelowy okres z wpisanej raty (przybliżenie)
-    // n = -ln(1 - rP/PMT) / ln(1+r)
-    if (r === 0) {
-      nModel = Math.ceil(P / PMT);
-    } else {
-      const x = 1 - (r * P) / PMT;
-      if (x > 0) {
-        nModel = Math.ceil((-Math.log(x)) / Math.log(1 + r));
-      }
-    }
-  }
-
-  if (!isFinite(nModel) || nModel <= 0) {
-    box.innerHTML = `
-      <div class="line">Rata modelowa: —</div>
-      <div class="line">Wpisana rata: ${fmt(PMT)}</div>
-      <div class="line warn">Uzupełnij dane, aby porównać ratę modelową.</div>
-    `;
-    return;
-  }
-
-  const modelPmt = calcAnnuityPayment(P, r, nModel);
-  const diff = PMT - modelPmt;
-  const absDiff = Math.abs(diff);
-
-  let hint = '';
-  if (absDiff < 1.5) {
-    hint = '<span class="ok">Bardzo zbliżona do modelu.</span>';
-  } else if (absDiff < 10) {
-    hint = '<span class="warn">Niewielka różnica – to częste (zaokrąglenia / odsetki dzienne / daty rat).</span>';
-  } else {
-    hint = '<span class="warn">Większa różnica – to nadal może być normalne w banku (odsetki dzienne, inne zasady naliczania, dodatkowe koszty w racie).</span>';
-  }
-
-  box.innerHTML = `
-    <div class="line">Rata modelowa: <span class="ok">${fmt(modelPmt)}</span></div>
-    <div class="line">Wpisana rata: ${fmt(PMT)}</div>
-    <div class="line">Różnica: <span class="${diff >= 0 ? 'warn' : 'bad'}">${fmt(diff)}</span></div>
-    <div class="line">${hint}</div>
-  `;
 }
 
 function updateDateRangeHint(){
@@ -638,15 +530,12 @@ function run(){
 
   updateDateRangeHint();
   updateLumpMonthHint();
-  updatePaymentCheckBox();
 }
 
 function clearAll(){
   ['P','PMT','startDate','endDate','rYear','extra','lump'].forEach(id => document.getElementById(id).value = '');
   document.getElementById('lumpMonth').value = '1';
   document.getElementById('mode').value = 'shorten';
-  document.getElementById('rateType').value = 'nominal';
-  document.getElementById('monthlyRatePreview').value = '—';
 
   ['kpiBaseN','kpiNewN','kpiSavedN','kpiBaseInt','kpiNewInt','kpiSavedInt','kpiMode','kpiFirstNewPmt']
     .forEach(id => document.getElementById(id).textContent = '—');
@@ -659,29 +548,20 @@ function clearAll(){
   updateModeUI();
   updateDateRangeHint();
   updateLumpMonthHint();
-  updatePaymentCheckBox();
 }
 
 document.getElementById('run').addEventListener('click', ()=>{ try{ run(); } catch(e){ alert(e.message); } });
 document.getElementById('reset').addEventListener('click', clearAll);
 
 document.getElementById('mode').addEventListener('change', updateModeUI);
-document.getElementById('rateType').addEventListener('change', () => { updateMonthlyRatePreview(); updatePaymentCheckBox(); });
-document.getElementById('rYear').addEventListener('input', () => { updateMonthlyRatePreview(); updatePaymentCheckBox(); });
-document.getElementById('P').addEventListener('input', updatePaymentCheckBox);
-document.getElementById('PMT').addEventListener('input', updatePaymentCheckBox);
-
-document.getElementById('startDate').addEventListener('change', () => { updateDateRangeHint(); updateLumpMonthHint(); updatePaymentCheckBox(); });
-document.getElementById('endDate').addEventListener('change', () => { updateDateRangeHint(); updateLumpMonthHint(); updatePaymentCheckBox(); });
-
+document.getElementById('startDate').addEventListener('change', () => { updateDateRangeHint(); updateLumpMonthHint(); });
+document.getElementById('endDate').addEventListener('change', () => { updateDateRangeHint(); updateLumpMonthHint(); });
 document.getElementById('lumpMonth').addEventListener('input', updateLumpMonthHint);
 document.getElementById('lump').addEventListener('input', updateLumpMonthHint);
 
 // start
-updateMonthlyRatePreview();
 updateModeUI();
 updateLumpMonthHint();
-updatePaymentCheckBox();
 </script>
 </body>
 </html>
