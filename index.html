@@ -70,21 +70,23 @@
           </div>
         </div>
 
-        <div class="row" style="margin-top:12px" id="modeRow">
-          <div id="endDateWrap">
-            <label>Data ostatniej raty <span class="muted">(wymagana dla trybu „niższa rata”)</span></label>
-            <input id="endDate" type="date" value="" />
-          </div>
-          <div id="modeWrap">
-            <label>Tryb nadpłaty</label>
-            <select id="mode">
-              <option value="shorten">Skrócenie okresu</option>
-              <option value="lower">Obniżenie raty</option>
-            </select>
-          </div>
-        </div>
+      <div id="modeSection" style="margin-top:12px">
+  <div class="row" id="modeRow">
+    <div id="endDateWrap">
+      <label>Data ostatniej raty <span class="muted">(wymagana dla trybu „niższa rata”)</span></label>
+      <input id="endDate" type="date" value="" />
+    </div>
+    <div id="modeWrap">
+      <label>Tryb nadpłaty</label>
+      <select id="mode">
+        <option value="shorten">Skrócenie okresu</option>
+        <option value="lower">Obniżenie raty</option>
+      </select>
+    </div>
+  </div>
 
-        <p id="dateRangeHint" class="note hidden" style="margin-top:8px">Pozostały okres: —</p>
+  <p id="dateRangeHint" class="note hidden" style="margin:8px 0 0 0">Pozostały okres: —</p>
+</div>
 
         <div class="row" style="margin-top:12px">
           <div>
