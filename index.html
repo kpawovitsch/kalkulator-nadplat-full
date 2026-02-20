@@ -1,0 +1,480 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Kalkulator nadpłat kredytu</title>
+  <style>
+    :root { --bg:#0b0c10; --card:#14161a; --muted:#8892a6; --fg:#e9eef7; --accent:#7aa2f7; --ok:#67e8a5; --warn:#f6c84f; --bad:#ff6b6b; }
+    *{box-sizing:border-box;font-family:Inter,system-ui,Segoe UI,Roboto,Helvetica,Arial,sans-serif}
+    body{margin:0;background:var(--bg);color:var(--fg);}
+    .wrap{max-width:1100px;margin:32px auto;padding:0 16px}
+    h1{font-size:28px;margin:0 0 18px}
+    p.help{color:var(--muted);margin-top:4px}
+    .grid{display:grid;gap:16px;grid-template-columns:repeat(12,1fr)}
+    .card{background:var(--card);border:1px solid rgba(255,255,255,.07);border-radius:16px;padding:16px}
+    .span-6{grid-column:span 6}
+    .span-12{grid-column:span 12}
+    label{display:block;font-size:12px;color:var(--muted);margin-bottom:6px}
+    input, select{width:100%;padding:10px 12px;border-radius:10px;border:1px solid rgba(255,255,255,.12);background:#0f1115;color:var(--fg)}
+    .row{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+    .btn{display:inline-flex;align-items:center;gap:8px;padding:10px 14px;border-radius:12px;border:1px solid rgba(255,255,255,.12);background:#11141a;color:var(--fg);cursor:pointer}
+    .btn.primary{background:var(--accent);border-color:transparent;color:#0b1220;font-weight:600}
+    .btn:disabled{opacity:.6;cursor:not-allowed}
+    .kpi{display:flex;gap:16px;flex-wrap:wrap}
+    .kpi .tile{flex:1 1 220px;background:#0f1217;border:1px dashed rgba(255,255,255,.12);border-radius:14px;padding:14px}
+    .kpi .tile b{display:block;font-size:12px;color:var(--muted);margin-bottom:6px}
+    .kpi .tile .val{font-size:22px}
+    table{width:100%;border-collapse:collapse;font-size:13px}
+    th,td{padding:10px;border-bottom:1px solid rgba(255,255,255,.06);text-align:right}
+    th{color:var(--muted);font-weight:600}
+    td:first-child, th:first-child{text-align:center}
+    .muted{color:var(--muted)}
+    .note{font-size:12px;color:var(--muted)}
+    .ok{color:var(--ok)}
+    .warn{color:var(--warn)}
+    @media (max-width:900px){.span-6{grid-column:span 12}}
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>📉 Kalkulator nadpłat kredytu</h1>
+    <p class="help">
+      Wpisz parametry oraz nadpłaty. Zobaczysz, o ile szybciej spłacisz kredyt i ile odsetek zaoszczędzisz.
+      <span class="muted">To wersja publiczna – pola startują puste.</span>
+    </p>
+
+    <div class="grid">
+      <div class="card span-6">
+        <div class="row">
+          <div>
+            <label>Saldo początkowe (PLN)</label>
+            <input id="P" type="number" step="0.01" value="" placeholder="np. 52237.35" />
+          </div>
+          <div>
+            <label>Rata podstawowa (PLN)</label>
+            <input id="PMT" type="number" step="0.01" value="" placeholder="np. 2347.14" />
+          </div>
+        </div>
+
+        <div class="row" style="margin-top:12px">
+          <div>
+            <label>Data pierwszej raty</label>
+            <input id="startDate" type="date" value="" />
+          </div>
+          <div>
+            <label>Roczna stopa efektywna (%) <span class="muted">(przeliczymy na miesięczną)</span></label>
+            <input id="rEff" type="number" step="0.0001" value="" placeholder="np. 14.865" />
+          </div>
+        </div>
+
+        <div class="row" style="margin-top:12px">
+          <div>
+            <label>Pozostały okres (miesiące) <span class="muted">(wymagane dla trybu „niższa rata”)</span></label>
+            <input id="remainingMonths" type="number" step="1" value="" placeholder="np. 36" />
+          </div>
+          <div>
+            <label>Tryb nadpłaty</label>
+            <select id="mode">
+              <option value="shorten">Skrócenie okresu</option>
+              <option value="lower">Obniżenie raty</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="row" style="margin-top:12px">
+          <div>
+            <label>Nadpłata miesięczna (PLN)</label>
+            <input id="extra" type="number" step="1" value="" placeholder="np. 500" />
+          </div>
+          <div>
+            <label>Nadpłata jednorazowa (PLN) <span class="muted">opcjonalnie</span></label>
+            <input id="lump" type="number" step="1" value="" placeholder="np. 10000" />
+          </div>
+        </div>
+
+        <div class="row" style="margin-top:12px">
+          <div>
+            <label>Miesiąc jednorazowej nadpłaty</label>
+            <input id="lumpMonth" type="number" step="1" value="1" />
+          </div>
+          <div>
+            <label>—</label>
+            <input type="text" disabled value="Daty pojawią się w tabeli po '#'" />
+          </div>
+        </div>
+
+        <div style="margin-top:14px;display:flex;gap:12px;flex-wrap:wrap">
+          <button id="run" class="btn primary">Przelicz</button>
+          <button id="reset" class="btn">Wyczyść pola</button>
+          <button id="exportCsv" class="btn" disabled>Eksportuj harmonogram CSV</button>
+        </div>
+
+        <p class="note" style="margin-top:10px">
+          Tryb „skrócenie okresu”: rata podstawowa zostaje stała, nadpłaty skracają czas spłaty.<br>
+          Tryb „obniżenie raty”: okres pozostaje stały, a rata jest przeliczana po każdej nadpłacie.
+          <span class="warn">Symulacja bankowa może różnić się detalami (zaokrąglenia, dni w miesiącu, moment przeliczenia).</span>
+        </p>
+      </div>
+
+      <div class="card span-6">
+        <div class="kpi">
+          <div class="tile"><b>Miesięcy do spłaty – bazowo</b><div class="val" id="kpiBaseN">—</div></div>
+          <div class="tile"><b>Miesięcy do spłaty – wynik</b><div class="val" id="kpiNewN">—</div></div>
+          <div class="tile"><b>Skrócenie okresu</b><div class="val" id="kpiSavedN">—</div></div>
+          <div class="tile"><b>Odsetki łącznie – bazowo</b><div class="val" id="kpiBaseInt">—</div></div>
+          <div class="tile"><b>Odsetki łącznie – wynik</b><div class="val" id="kpiNewInt">—</div></div>
+          <div class="tile"><b>Oszczędność na odsetkach</b><div class="val ok" id="kpiSavedInt">—</div></div>
+          <div class="tile"><b>Tryb</b><div class="val" id="kpiMode" style="font-size:16px">—</div></div>
+          <div class="tile"><b>Nowa rata (1. miesiąc, tryb „niższa rata”)</b><div class="val" id="kpiFirstNewPmt" style="font-size:18px">—</div></div>
+        </div>
+      </div>
+
+      <div class="card span-12">
+        <h3 style="margin:0 0 12px">Harmonogram (wybrany wariant)</h3>
+        <table id="tbl">
+          <thead>
+            <tr>
+              <th># / Data</th>
+              <th>Saldo start</th>
+              <th>Odsetki</th>
+              <th>Rata</th>
+              <th>Nadpłata</th>
+              <th>Spłata kapitału</th>
+              <th>Saldo koniec</th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+<script>
+'use strict';
+
+function fmt(n){
+  return (isNaN(n) ? '—' : n.toLocaleString('pl-PL',{minimumFractionDigits:2,maximumFractionDigits:2})) + ' PLN';
+}
+function fmtN(n){ return isFinite(n) ? Math.round(n) : '—'; }
+
+// efektywna -> miesięczna
+function toMonthlyRate(rEff){ return Math.pow(1+rEff,1/12)-1; }
+
+function hasMinimumInputs(){
+  const P = document.getElementById('P').value;
+  const PMT = document.getElementById('PMT').value;
+  const rEff = document.getElementById('rEff').value;
+  const mode = document.getElementById('mode').value;
+  const rem = document.getElementById('remainingMonths').value;
+
+  if (String(P).trim() === '' || String(PMT).trim() === '' || String(rEff).trim() === '') return false;
+  if (mode === 'lower' && String(rem).trim() === '') return false;
+  return true;
+}
+
+function calcAnnuityPayment(P, r, n){
+  if (n <= 0) return 0;
+  if (r === 0) return P / n;
+  return P * r / (1 - Math.pow(1 + r, -n));
+}
+
+// Tryb: skrócenie okresu (obecny)
+function amortizeShorten({P, PMT, r, extra=0, lump=0, lumpMonth=1, maxMonths=480}){
+  let bal = Number(P);
+  let m = 0, totalInt = 0;
+  const rows = [];
+
+  if (r < 0) throw new Error('Stopa procentowa nie może być ujemna.');
+  if (PMT <= 0) throw new Error('Rata musi być większa od 0.');
+
+  while (bal > 0.005 && m < maxMonths){
+    m++;
+    const start = bal;
+    const interest = bal * r;
+
+    const extraLump = (m === Number(lumpMonth) ? Number(lump) : 0);
+
+    const needPrincipalNoLump = Math.max(bal - extraLump, 0);
+    const maxNeededNoLump = interest + needPrincipalNoLump;
+
+    const desiredNoLump = PMT + extra;
+    const paidNoLump = Math.min(desiredNoLump, maxNeededNoLump);
+
+    if (paidNoLump <= interest + 1e-9){
+      throw new Error('Rata za mała względem oprocentowania. Zwiększ PMT lub zmniejsz stopę.');
+    }
+
+    const pmtPaid  = Math.min(PMT, paidNoLump);
+    const extraPaid = paidNoLump - pmtPaid;
+
+    const principalNoLump = paidNoLump - interest;
+    const endBal = Math.max(bal - principalNoLump - extraLump, 0);
+
+    rows.push({
+      m,
+      start,
+      interest,
+      pmt: pmtPaid,
+      extra: extraPaid,
+      extraLump,
+      principal: principalNoLump,
+      endBal
+    });
+
+    totalInt += interest;
+    bal = endBal;
+  }
+
+  if (m >= maxMonths && bal > 0.005) {
+    throw new Error('Nie udało się spłacić kredytu w limicie miesięcy. Sprawdź dane wejściowe.');
+  }
+
+  return {months:m, totalInterest:totalInt, rows};
+}
+
+// Tryb: obniżenie raty (okres stały)
+function amortizeLowerPayment({P, PMT, r, remainingMonths, extra=0, lump=0, lumpMonth=1}){
+  let bal = Number(P);
+  let totalInt = 0;
+  const rows = [];
+  const nTotal = Number(remainingMonths);
+
+  if (!Number.isFinite(nTotal) || nTotal <= 0) throw new Error('Podaj poprawny pozostały okres (miesiące).');
+  if (r < 0) throw new Error('Stopa procentowa nie może być ujemna.');
+  if (PMT <= 0) throw new Error('Rata musi być większa od 0.');
+
+  for (let m = 1; m <= nTotal; m++){
+    if (bal <= 0.005) break;
+
+    const nLeftThisMonth = nTotal - m + 1;
+    const start = bal;
+    const interest = bal * r;
+    const extraLump = (m === Number(lumpMonth) ? Number(lump) : 0);
+
+    // Rata przeliczona dla pozostałego okresu, ale nie większa niż potrzeba
+    const recalculatedPMT = calcAnnuityPayment(start, r, nLeftThisMonth);
+    const pmtCandidate = Math.max(0, recalculatedPMT);
+
+    // Najpierw rata + miesięczna nadpłata, potem jednorazowa
+    const needPrincipalNoLump = Math.max(start - extraLump, 0);
+    const maxNeededNoLump = interest + needPrincipalNoLump;
+
+    const desiredNoLump = pmtCandidate + Number(extra || 0);
+    const paidNoLump = Math.min(desiredNoLump, maxNeededNoLump);
+
+    if (paidNoLump <= interest + 1e-9){
+      throw new Error('Rata po przeliczeniu jest za mała względem odsetek. Sprawdź dane wejściowe.');
+    }
+
+    const pmtPaid = Math.min(pmtCandidate, paidNoLump);
+    const extraPaid = paidNoLump - pmtPaid;
+
+    const principalNoLump = paidNoLump - interest;
+    const endBal = Math.max(start - principalNoLump - extraLump, 0);
+
+    rows.push({
+      m,
+      start,
+      interest,
+      pmt: pmtPaid,
+      extra: extraPaid,
+      extraLump,
+      principal: principalNoLump,
+      endBal
+    });
+
+    totalInt += interest;
+    bal = endBal;
+  }
+
+  // Jeżeli po zadanym okresie saldo > 0, to znaczy że dane są niespójne (np. PMT wejściowe bardzo dziwne)
+  if (bal > 0.01){
+    throw new Error('Po zadanym okresie pozostało saldo. Sprawdź ratę, stopę i liczbę miesięcy.');
+  }
+
+  return {months: rows.length, totalInterest: totalInt, rows};
+}
+
+function formatDate(d){
+  const dd = String(d.getDate()).padStart(2,'0');
+  const mm = String(d.getMonth()+1).padStart(2,'0');
+  const yy = d.getFullYear();
+  return `${dd}.${mm}.${yy}`;
+}
+function daysInMonth(y,m){ return new Date(y, m+1, 0).getDate(); }
+function addMonthsKeepDay(date, add){
+  const y = date.getFullYear();
+  const m = date.getMonth();
+  const d = date.getDate();
+  const targetM = m + add;
+  const targetY = y + Math.floor(targetM/12);
+  const normM = ((targetM%12)+12)%12;
+  const dim = daysInMonth(targetY, normM);
+  return new Date(targetY, normM, Math.min(d, dim));
+}
+
+function renderTable(rows, startDate){
+  const tb = document.querySelector('#tbl tbody');
+  tb.innerHTML = '';
+  rows.forEach(r=>{
+    const tr = document.createElement('tr');
+    const d = startDate ? addMonthsKeepDay(startDate, r.m-1) : null;
+    const label = startDate ? `${r.m} # ${formatDate(d)}` : String(r.m);
+
+    const cells = [
+      label,
+      r.start,
+      r.interest,
+      r.pmt,
+      (r.extra + r.extraLump),
+      (r.principal + r.extraLump),
+      r.endBal
+    ];
+
+    cells.forEach((v,i)=>{
+      const td = document.createElement('td');
+      if (i === 0) td.textContent = v;
+      else td.textContent = fmt(v);
+      tr.appendChild(td);
+    });
+
+    tb.appendChild(tr);
+  });
+}
+
+function toCSV(rows, startDate){
+  const header = ['Okres','Data','Saldo_start','Odsetki','Rata','Nadpłata','Spłata_kapitału','Saldo_koniec'];
+  const body = rows.map(r=>{
+    const d = startDate ? addMonthsKeepDay(startDate, r.m-1) : null;
+    const dateStr = startDate ? formatDate(d) : '';
+    return [
+      r.m,
+      dateStr,
+      r.start.toFixed(2),
+      r.interest.toFixed(2),
+      r.pmt.toFixed(2),
+      (r.extra + r.extraLump).toFixed(2),
+      (r.principal + r.extraLump).toFixed(2),
+      r.endBal.toFixed(2)
+    ].join(',');
+  });
+  return [header.join(','), ...body].join('\n');
+}
+
+function getInputs(){
+  const P = parseFloat(document.getElementById('P').value || '0');
+  const PMT = parseFloat(document.getElementById('PMT').value || '0');
+  const rEffRaw = document.getElementById('rEff').value;
+  const rEff = parseFloat(rEffRaw || '0')/100;
+  const r = toMonthlyRate(rEff);
+
+  const remainingMonths = parseInt(document.getElementById('remainingMonths').value || '0', 10);
+
+  const mode = document.getElementById('mode').value;
+  const extra = parseFloat(document.getElementById('extra').value || '0');
+  const lump = parseFloat(document.getElementById('lump').value || '0');
+  const lumpMonth = parseInt(document.getElementById('lumpMonth').value || '1', 10);
+
+  const startDateInput = document.getElementById('startDate').value;
+  const startDate = startDateInput ? new Date(startDateInput) : null;
+
+  return {P, PMT, r, remainingMonths, mode, extra, lump, lumpMonth, startDate};
+}
+
+function enableExport(withRows, startDate){
+  const btn = document.getElementById('exportCsv');
+  btn.disabled = false;
+  btn.onclick = () => {
+    const csv = toCSV(withRows, startDate);
+    const blob = new Blob([csv], {type:'text/csv;charset=utf-8;'});
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'harmonogram_nadplat.csv';
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+}
+
+function run(){
+  if (!hasMinimumInputs()){
+    alert('Uzupełnij przynajmniej: Saldo początkowe, Ratę podstawową i Stopę roczną. Dla trybu „niższa rata” podaj też pozostały okres.');
+    return;
+  }
+
+  const {P, PMT, r, remainingMonths, mode, extra, lump, lumpMonth, startDate} = getInputs();
+
+  let base, result, modeLabel;
+
+  if (mode === 'lower') {
+    base = amortizeLowerPayment({P, PMT, r, remainingMonths, extra:0, lump:0});
+    result = amortizeLowerPayment({P, PMT, r, remainingMonths, extra, lump, lumpMonth});
+    modeLabel = 'Obniżenie raty';
+  } else {
+    base = amortizeShorten({P, PMT, r, extra:0, lump:0});
+    result = amortizeShorten({P, PMT, r, extra, lump, lumpMonth});
+    modeLabel = 'Skrócenie okresu';
+  }
+
+  document.getElementById('kpiBaseN').textContent = fmtN(base.months) + ' mies.';
+  document.getElementById('kpiNewN').textContent  = fmtN(result.months) + ' mies.';
+  document.getElementById('kpiSavedN').textContent = fmtN(base.months - result.months) + ' mies.';
+
+  document.getElementById('kpiBaseInt').textContent = fmt(base.totalInterest);
+  document.getElementById('kpiNewInt').textContent  = fmt(result.totalInterest);
+  document.getElementById('kpiSavedInt').textContent= fmt(base.totalInterest - result.totalInterest);
+
+  document.getElementById('kpiMode').textContent = modeLabel;
+
+  if (mode === 'lower' && result.rows.length > 0) {
+    document.getElementById('kpiFirstNewPmt').textContent = fmt(result.rows[0].pmt);
+  } else {
+    document.getElementById('kpiFirstNewPmt').textContent = '—';
+  }
+
+  renderTable(result.rows, startDate);
+  enableExport(result.rows, startDate);
+}
+
+function clearAll(){
+  document.getElementById('P').value = '';
+  document.getElementById('PMT').value = '';
+  document.getElementById('startDate').value = '';
+  document.getElementById('rEff').value = '';
+  document.getElementById('remainingMonths').value = '';
+  document.getElementById('mode').value = 'shorten';
+  document.getElementById('extra').value = '';
+  document.getElementById('lump').value = '';
+  document.getElementById('lumpMonth').value = '1';
+
+  document.getElementById('kpiBaseN').textContent = '—';
+  document.getElementById('kpiNewN').textContent = '—';
+  document.getElementById('kpiSavedN').textContent = '—';
+  document.getElementById('kpiBaseInt').textContent = '—';
+  document.getElementById('kpiNewInt').textContent = '—';
+  document.getElementById('kpiSavedInt').textContent = '—';
+  document.getElementById('kpiMode').textContent = '—';
+  document.getElementById('kpiFirstNewPmt').textContent = '—';
+
+  document.querySelector('#tbl tbody').innerHTML = '';
+  const btn = document.getElementById('exportCsv');
+  btn.disabled = true;
+  btn.onclick = null;
+}
+
+document.getElementById('run').addEventListener('click', ()=>{ try{ run(); } catch(e){ alert(e.message); } });
+document.getElementById('reset').addEventListener('click', ()=>{ clearAll(); });
+
+// Mały UX hint: placeholder dla okresu przy zmianie trybu
+document.getElementById('mode').addEventListener('change', (e)=>{
+  const rem = document.getElementById('remainingMonths');
+  if (e.target.value === 'lower') {
+    rem.placeholder = 'np. 36 (wymagane)';
+  } else {
+    rem.placeholder = 'np. 36 (opcjonalnie)';
+  }
+});
+</script>
+</body>
+</html>
