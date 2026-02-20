@@ -33,6 +33,8 @@
     .note{font-size:12px;color:var(--muted)}
     .ok{color:var(--ok)}
     .warn{color:var(--warn)}
+    .bad{color:var(--bad)}
+    .hidden{display:none !important;}
     @media (max-width:900px){.span-6{grid-column:span 12}}
   </style>
 </head>
@@ -41,6 +43,7 @@
     <h1>📉 Kalkulator nadpłat kredytu</h1>
     <p class="help">
       Wpisz parametry oraz nadpłaty. Zobaczysz, o ile szybciej spłacisz kredyt i ile odsetek zaoszczędzisz.
+      <span class="muted">To wersja publiczna – pola startują puste.</span>
     </p>
 
     <div class="grid">
@@ -67,12 +70,12 @@
           </div>
         </div>
 
-        <div class="row" style="margin-top:12px">
-          <div>
-            <label>Pozostały okres (miesiące) <span class="muted">(wymagane dla trybu „niższa rata”)</span></label>
-            <input id="remainingMonths" type="number" step="1" value="" placeholder="np. 36" />
+        <div class="row" style="margin-top:12px" id="modeRow">
+          <div id="endDateWrap">
+            <label>Data ostatniej raty <span class="muted">(wymagana dla trybu „niższa rata”)</span></label>
+            <input id="endDate" type="date" value="" />
           </div>
-          <div>
+          <div id="modeWrap">
             <label>Tryb nadpłaty</label>
             <select id="mode">
               <option value="shorten">Skrócenie okresu</option>
@@ -80,6 +83,8 @@
             </select>
           </div>
         </div>
+
+        <p id="dateRangeHint" class="note hidden" style="margin-top:8px">Pozostały okres: —</p>
 
         <div class="row" style="margin-top:12px">
           <div>
@@ -96,6 +101,7 @@
           <div>
             <label>Miesiąc jednorazowej nadpłaty</label>
             <input id="lumpMonth" type="number" step="1" value="1" />
+            <p id="lumpMonthHint" class="note" style="margin-top:6px">—</p>
           </div>
           <div>
             <label>—</label>
@@ -125,7 +131,7 @@
           <div class="tile"><b>Odsetki łącznie – wynik</b><div class="val" id="kpiNewInt">—</div></div>
           <div class="tile"><b>Oszczędność na odsetkach</b><div class="val ok" id="kpiSavedInt">—</div></div>
           <div class="tile"><b>Tryb</b><div class="val" id="kpiMode" style="font-size:16px">—</div></div>
-          <div class="tile"><b>Nowa rata (1. miesiąc, tryb „niższa rata”)</b><div class="val" id="kpiFirstNewPmt" style="font-size:18px">—</div></div>
+          <div class="tile"><b>Nowa, najbliższa rata (tryb „niższa rata”)</b><div class="val" id="kpiFirstNewPmt" style="font-size:18px">—</div></div>
         </div>
       </div>
 
@@ -156,19 +162,36 @@ function fmt(n){
   return (isNaN(n) ? '—' : n.toLocaleString('pl-PL',{minimumFractionDigits:2,maximumFractionDigits:2})) + ' PLN';
 }
 function fmtN(n){ return isFinite(n) ? Math.round(n) : '—'; }
-
-// efektywna -> miesięczna
 function toMonthlyRate(rEff){ return Math.pow(1+rEff,1/12)-1; }
+
+function parseDateInput(id){
+  const v = document.getElementById(id).value;
+  return v ? new Date(v + 'T00:00:00') : null;
+}
+
+function monthsBetweenInclusive(startDate, endDate){
+  if (!startDate || !endDate) return null;
+
+  const y1 = startDate.getFullYear();
+  const m1 = startDate.getMonth();
+  const y2 = endDate.getFullYear();
+  const m2 = endDate.getMonth();
+
+  const diff = (y2 - y1) * 12 + (m2 - m1);
+  if (diff < 0) throw new Error('Data ostatniej raty nie może być wcześniejsza niż data pierwszej raty.');
+
+  return diff + 1;
+}
 
 function hasMinimumInputs(){
   const P = document.getElementById('P').value;
   const PMT = document.getElementById('PMT').value;
   const rEff = document.getElementById('rEff').value;
   const mode = document.getElementById('mode').value;
-  const rem = document.getElementById('remainingMonths').value;
+  const endDate = document.getElementById('endDate').value;
 
   if (String(P).trim() === '' || String(PMT).trim() === '' || String(rEff).trim() === '') return false;
-  if (mode === 'lower' && String(rem).trim() === '') return false;
+  if (mode === 'lower' && String(endDate).trim() === '') return false;
   return true;
 }
 
@@ -178,7 +201,6 @@ function calcAnnuityPayment(P, r, n){
   return P * r / (1 - Math.pow(1 + r, -n));
 }
 
-// Tryb: skrócenie okresu (obecny)
 function amortizeShorten({P, PMT, r, extra=0, lump=0, lumpMonth=1, maxMonths=480}){
   let bal = Number(P);
   let m = 0, totalInt = 0;
@@ -191,12 +213,10 @@ function amortizeShorten({P, PMT, r, extra=0, lump=0, lumpMonth=1, maxMonths=480
     m++;
     const start = bal;
     const interest = bal * r;
-
     const extraLump = (m === Number(lumpMonth) ? Number(lump) : 0);
 
     const needPrincipalNoLump = Math.max(bal - extraLump, 0);
     const maxNeededNoLump = interest + needPrincipalNoLump;
-
     const desiredNoLump = PMT + extra;
     const paidNoLump = Math.min(desiredNoLump, maxNeededNoLump);
 
@@ -206,40 +226,26 @@ function amortizeShorten({P, PMT, r, extra=0, lump=0, lumpMonth=1, maxMonths=480
 
     const pmtPaid  = Math.min(PMT, paidNoLump);
     const extraPaid = paidNoLump - pmtPaid;
-
     const principalNoLump = paidNoLump - interest;
     const endBal = Math.max(bal - principalNoLump - extraLump, 0);
 
-    rows.push({
-      m,
-      start,
-      interest,
-      pmt: pmtPaid,
-      extra: extraPaid,
-      extraLump,
-      principal: principalNoLump,
-      endBal
-    });
+    rows.push({ m, start, interest, pmt: pmtPaid, extra: extraPaid, extraLump, principal: principalNoLump, endBal });
 
     totalInt += interest;
     bal = endBal;
   }
 
-  if (m >= maxMonths && bal > 0.005) {
-    throw new Error('Nie udało się spłacić kredytu w limicie miesięcy. Sprawdź dane wejściowe.');
-  }
-
+  if (m >= maxMonths && bal > 0.005) throw new Error('Nie udało się spłacić kredytu w limicie miesięcy.');
   return {months:m, totalInterest:totalInt, rows};
 }
 
-// Tryb: obniżenie raty (okres stały)
 function amortizeLowerPayment({P, PMT, r, remainingMonths, extra=0, lump=0, lumpMonth=1}){
   let bal = Number(P);
   let totalInt = 0;
   const rows = [];
   const nTotal = Number(remainingMonths);
 
-  if (!Number.isFinite(nTotal) || nTotal <= 0) throw new Error('Podaj poprawny pozostały okres (miesiące).');
+  if (!Number.isFinite(nTotal) || nTotal <= 0) throw new Error('Nie udało się wyliczyć poprawnej liczby miesięcy z dat.');
   if (r < 0) throw new Error('Stopa procentowa nie może być ujemna.');
   if (PMT <= 0) throw new Error('Rata musi być większa od 0.');
 
@@ -251,11 +257,9 @@ function amortizeLowerPayment({P, PMT, r, remainingMonths, extra=0, lump=0, lump
     const interest = bal * r;
     const extraLump = (m === Number(lumpMonth) ? Number(lump) : 0);
 
-    // Rata przeliczona dla pozostałego okresu, ale nie większa niż potrzeba
     const recalculatedPMT = calcAnnuityPayment(start, r, nLeftThisMonth);
     const pmtCandidate = Math.max(0, recalculatedPMT);
 
-    // Najpierw rata + miesięczna nadpłata, potem jednorazowa
     const needPrincipalNoLump = Math.max(start - extraLump, 0);
     const maxNeededNoLump = interest + needPrincipalNoLump;
 
@@ -263,33 +267,22 @@ function amortizeLowerPayment({P, PMT, r, remainingMonths, extra=0, lump=0, lump
     const paidNoLump = Math.min(desiredNoLump, maxNeededNoLump);
 
     if (paidNoLump <= interest + 1e-9){
-      throw new Error('Rata po przeliczeniu jest za mała względem odsetek. Sprawdź dane wejściowe.');
+      throw new Error('Rata po przeliczeniu jest za mała względem odsetek.');
     }
 
     const pmtPaid = Math.min(pmtCandidate, paidNoLump);
     const extraPaid = paidNoLump - pmtPaid;
-
     const principalNoLump = paidNoLump - interest;
     const endBal = Math.max(start - principalNoLump - extraLump, 0);
 
-    rows.push({
-      m,
-      start,
-      interest,
-      pmt: pmtPaid,
-      extra: extraPaid,
-      extraLump,
-      principal: principalNoLump,
-      endBal
-    });
+    rows.push({ m, start, interest, pmt: pmtPaid, extra: extraPaid, extraLump, principal: principalNoLump, endBal });
 
     totalInt += interest;
     bal = endBal;
   }
 
-  // Jeżeli po zadanym okresie saldo > 0, to znaczy że dane są niespójne (np. PMT wejściowe bardzo dziwne)
   if (bal > 0.01){
-    throw new Error('Po zadanym okresie pozostało saldo. Sprawdź ratę, stopę i liczbę miesięcy.');
+    throw new Error('Po zadanym okresie pozostało saldo. Sprawdź dane wejściowe (rata / stopa / daty).');
   }
 
   return {months: rows.length, totalInterest: totalInt, rows};
@@ -321,20 +314,11 @@ function renderTable(rows, startDate){
     const d = startDate ? addMonthsKeepDay(startDate, r.m-1) : null;
     const label = startDate ? `${r.m} # ${formatDate(d)}` : String(r.m);
 
-    const cells = [
-      label,
-      r.start,
-      r.interest,
-      r.pmt,
-      (r.extra + r.extraLump),
-      (r.principal + r.extraLump),
-      r.endBal
-    ];
+    const cells = [ label, r.start, r.interest, r.pmt, (r.extra + r.extraLump), (r.principal + r.extraLump), r.endBal ];
 
     cells.forEach((v,i)=>{
       const td = document.createElement('td');
-      if (i === 0) td.textContent = v;
-      else td.textContent = fmt(v);
+      td.textContent = (i === 0) ? v : fmt(v);
       tr.appendChild(td);
     });
 
@@ -364,28 +348,28 @@ function toCSV(rows, startDate){
 function getInputs(){
   const P = parseFloat(document.getElementById('P').value || '0');
   const PMT = parseFloat(document.getElementById('PMT').value || '0');
-  const rEffRaw = document.getElementById('rEff').value;
-  const rEff = parseFloat(rEffRaw || '0')/100;
+  const rEff = parseFloat(document.getElementById('rEff').value || '0') / 100;
   const r = toMonthlyRate(rEff);
 
-  const remainingMonths = parseInt(document.getElementById('remainingMonths').value || '0', 10);
+  const startDate = parseDateInput('startDate');
+  const endDate = parseDateInput('endDate');
 
   const mode = document.getElementById('mode').value;
   const extra = parseFloat(document.getElementById('extra').value || '0');
   const lump = parseFloat(document.getElementById('lump').value || '0');
   const lumpMonth = parseInt(document.getElementById('lumpMonth').value || '1', 10);
 
-  const startDateInput = document.getElementById('startDate').value;
-  const startDate = startDateInput ? new Date(startDateInput) : null;
+  let remainingMonths = null;
+  if (startDate && endDate) remainingMonths = monthsBetweenInclusive(startDate, endDate);
 
-  return {P, PMT, r, remainingMonths, mode, extra, lump, lumpMonth, startDate};
+  return {P, PMT, r, startDate, endDate, remainingMonths, mode, extra, lump, lumpMonth};
 }
 
-function enableExport(withRows, startDate){
+function enableExport(rows, startDate){
   const btn = document.getElementById('exportCsv');
   btn.disabled = false;
   btn.onclick = () => {
-    const csv = toCSV(withRows, startDate);
+    const csv = toCSV(rows, startDate);
     const blob = new Blob([csv], {type:'text/csv;charset=utf-8;'});
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -396,21 +380,122 @@ function enableExport(withRows, startDate){
   };
 }
 
-function run(){
-  if (!hasMinimumInputs()){
-    alert('Uzupełnij przynajmniej: Saldo początkowe, Ratę podstawową i Stopę roczną. Dla trybu „niższa rata” podaj też pozostały okres.');
+function updateModeUI(){
+  const mode = document.getElementById('mode').value;
+  const endDateWrap = document.getElementById('endDateWrap');
+  const modeWrap = document.getElementById('modeWrap');
+  const dateHint = document.getElementById('dateRangeHint');
+
+  if (mode === 'lower'){
+    endDateWrap.classList.remove('hidden');
+    dateHint.classList.remove('hidden');
+    modeWrap.style.gridColumn = '';
+  } else {
+    endDateWrap.classList.add('hidden');
+    dateHint.classList.add('hidden');
+    modeWrap.style.gridColumn = '1 / span 2';
+  }
+
+  updateDateRangeHint();
+  updateLumpMonthHint();
+}
+
+function updateDateRangeHint(){
+  const hint = document.getElementById('dateRangeHint');
+  const mode = document.getElementById('mode').value;
+  if (!hint) return;
+
+  if (mode !== 'lower'){
+    hint.innerHTML = 'Pozostały okres: —';
     return;
   }
 
-  const {P, PMT, r, remainingMonths, mode, extra, lump, lumpMonth, startDate} = getInputs();
+  const startDate = parseDateInput('startDate');
+  const endDate = parseDateInput('endDate');
+
+  if (!startDate || !endDate){
+    hint.innerHTML = 'Pozostały okres: — <span class="warn">(wymagany w trybie „niższa rata”)</span>';
+    return;
+  }
+
+  try {
+    const months = monthsBetweenInclusive(startDate, endDate);
+    const sameDay = startDate.getDate() === endDate.getDate();
+    const sameDayNote = sameDay ? '' : ' <span class="warn">(różne dni miesiąca — liczenie kalendarzowe)</span>';
+    hint.innerHTML = `Pozostały okres: <span class="ok">${months} mies.</span>${sameDayNote}`;
+  } catch (e){
+    hint.innerHTML = `<span class="bad">${e.message}</span>`;
+  }
+}
+
+function updateLumpMonthHint(){
+  const hint = document.getElementById('lumpMonthHint');
+  const mode = document.getElementById('mode').value;
+  const lumpVal = document.getElementById('lump').value;
+  const lumpMonthRaw = document.getElementById('lumpMonth').value;
+  const lumpMonth = parseInt(lumpMonthRaw || '0', 10);
+
+  if (!hint) return;
+
+  if (String(lumpVal).trim() === '' || Number(lumpVal) <= 0){
+    hint.innerHTML = 'Jednorazowa nadpłata jest opcjonalna.';
+    return;
+  }
+
+  if (!Number.isInteger(lumpMonth) || lumpMonth < 1){
+    hint.innerHTML = '<span class="bad">Podaj miesiąc nadpłaty jako liczbę całkowitą ≥ 1.</span>';
+    return;
+  }
+
+  if (mode === 'lower'){
+    const startDate = parseDateInput('startDate');
+    const endDate = parseDateInput('endDate');
+
+    if (!startDate || !endDate){
+      hint.innerHTML = '<span class="warn">Aby zwalidować miesiąc nadpłaty, uzupełnij datę pierwszej i ostatniej raty.</span>';
+      return;
+    }
+
+    try {
+      const months = monthsBetweenInclusive(startDate, endDate);
+      if (lumpMonth > months){
+        hint.innerHTML = `<span class="bad">Miesiąc nadpłaty (${lumpMonth}) jest poza zakresem: 1–${months}.</span>`;
+      } else {
+        const d = addMonthsKeepDay(startDate, lumpMonth - 1);
+        hint.innerHTML = `Jednorazowa nadpłata w miesiącu <span class="ok">${lumpMonth}</span> (${formatDate(d)}).`;
+      }
+    } catch (e){
+      hint.innerHTML = `<span class="bad">${e.message}</span>`;
+    }
+    return;
+  }
+
+  // tryb skrócenia okresu – nie znamy limitu bez przeliczenia, ale walidujemy minimum
+  hint.innerHTML = `Jednorazowa nadpłata w miesiącu <span class="ok">${lumpMonth}</span>. <span class="muted">(maksymalny zakres zależy od długości spłaty)</span>`;
+}
+
+function run(){
+  if (!hasMinimumInputs()){
+    alert('Uzupełnij przynajmniej: Saldo początkowe, Ratę podstawową i Stopę roczną. Dla trybu „niższa rata” podaj datę ostatniej raty.');
+    return;
+  }
+
+  const {P, PMT, r, startDate, endDate, remainingMonths, mode, extra, lump, lumpMonth} = getInputs();
 
   let base, result, modeLabel;
 
   if (mode === 'lower') {
+    if (!startDate || !endDate) throw new Error('Dla trybu „niższa rata” podaj datę pierwszej i ostatniej raty.');
+    if (lump > 0 && (lumpMonth < 1 || lumpMonth > remainingMonths)) {
+      throw new Error(`Miesiąc jednorazowej nadpłaty musi mieścić się w zakresie 1–${remainingMonths}.`);
+    }
+
     base = amortizeLowerPayment({P, PMT, r, remainingMonths, extra:0, lump:0});
     result = amortizeLowerPayment({P, PMT, r, remainingMonths, extra, lump, lumpMonth});
     modeLabel = 'Obniżenie raty';
   } else {
+    if (lump > 0 && lumpMonth < 1) throw new Error('Miesiąc jednorazowej nadpłaty musi być >= 1.');
+
     base = amortizeShorten({P, PMT, r, extra:0, lump:0});
     result = amortizeShorten({P, PMT, r, extra, lump, lumpMonth});
     modeLabel = 'Skrócenie okresu';
@@ -419,11 +504,9 @@ function run(){
   document.getElementById('kpiBaseN').textContent = fmtN(base.months) + ' mies.';
   document.getElementById('kpiNewN').textContent  = fmtN(result.months) + ' mies.';
   document.getElementById('kpiSavedN').textContent = fmtN(base.months - result.months) + ' mies.';
-
   document.getElementById('kpiBaseInt').textContent = fmt(base.totalInterest);
   document.getElementById('kpiNewInt').textContent  = fmt(result.totalInterest);
   document.getElementById('kpiSavedInt').textContent= fmt(base.totalInterest - result.totalInterest);
-
   document.getElementById('kpiMode').textContent = modeLabel;
 
   if (mode === 'lower' && result.rows.length > 0) {
@@ -434,46 +517,42 @@ function run(){
 
   renderTable(result.rows, startDate);
   enableExport(result.rows, startDate);
+
+  // po przeliczeniu odśwież hinty (np. po zmianie wartości)
+  updateDateRangeHint();
+  updateLumpMonthHint();
 }
 
 function clearAll(){
-  document.getElementById('P').value = '';
-  document.getElementById('PMT').value = '';
-  document.getElementById('startDate').value = '';
-  document.getElementById('rEff').value = '';
-  document.getElementById('remainingMonths').value = '';
-  document.getElementById('mode').value = 'shorten';
-  document.getElementById('extra').value = '';
-  document.getElementById('lump').value = '';
+  ['P','PMT','startDate','endDate','rEff','extra','lump'].forEach(id => document.getElementById(id).value = '');
   document.getElementById('lumpMonth').value = '1';
+  document.getElementById('mode').value = 'shorten';
 
-  document.getElementById('kpiBaseN').textContent = '—';
-  document.getElementById('kpiNewN').textContent = '—';
-  document.getElementById('kpiSavedN').textContent = '—';
-  document.getElementById('kpiBaseInt').textContent = '—';
-  document.getElementById('kpiNewInt').textContent = '—';
-  document.getElementById('kpiSavedInt').textContent = '—';
-  document.getElementById('kpiMode').textContent = '—';
-  document.getElementById('kpiFirstNewPmt').textContent = '—';
+  ['kpiBaseN','kpiNewN','kpiSavedN','kpiBaseInt','kpiNewInt','kpiSavedInt','kpiMode','kpiFirstNewPmt']
+    .forEach(id => document.getElementById(id).textContent = '—');
 
   document.querySelector('#tbl tbody').innerHTML = '';
   const btn = document.getElementById('exportCsv');
   btn.disabled = true;
   btn.onclick = null;
+
+  updateModeUI();
+  updateDateRangeHint();
+  updateLumpMonthHint();
 }
 
 document.getElementById('run').addEventListener('click', ()=>{ try{ run(); } catch(e){ alert(e.message); } });
-document.getElementById('reset').addEventListener('click', ()=>{ clearAll(); });
+document.getElementById('reset').addEventListener('click', clearAll);
 
-// Mały UX hint: placeholder dla okresu przy zmianie trybu
-document.getElementById('mode').addEventListener('change', (e)=>{
-  const rem = document.getElementById('remainingMonths');
-  if (e.target.value === 'lower') {
-    rem.placeholder = 'np. 36 (wymagane)';
-  } else {
-    rem.placeholder = 'np. 36 (opcjonalnie)';
-  }
-});
+document.getElementById('mode').addEventListener('change', updateModeUI);
+document.getElementById('startDate').addEventListener('change', () => { updateDateRangeHint(); updateLumpMonthHint(); });
+document.getElementById('endDate').addEventListener('change', () => { updateDateRangeHint(); updateLumpMonthHint(); });
+document.getElementById('lumpMonth').addEventListener('input', updateLumpMonthHint);
+document.getElementById('lump').addEventListener('input', updateLumpMonthHint);
+
+// start
+updateModeUI();
+updateLumpMonthHint();
 </script>
 </body>
 </html>
