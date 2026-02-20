@@ -35,6 +35,11 @@
     .warn{color:var(--warn)}
     .bad{color:var(--bad)}
     .hidden{display:none !important;}
+    .mini-box{
+      margin-top:10px;padding:10px 12px;border:1px solid rgba(255,255,255,.08);
+      background:#0f1217;border-radius:10px;font-size:12px;color:var(--muted);line-height:1.35;
+    }
+    .mini-box .line{margin:2px 0}
     @media (max-width:900px){.span-6{grid-column:span 12}}
   </style>
 </head>
@@ -65,28 +70,48 @@
             <input id="startDate" type="date" value="" />
           </div>
           <div>
-            <label>Roczna stopa efektywna (%) <span class="muted">(przeliczymy na miesięczną)</span></label>
-            <input id="rEff" type="number" step="0.0001" value="" placeholder="np. 14.865" />
+            <label>Roczna stopa (%)</label>
+            <input id="rYear" type="number" step="0.0001" value="" placeholder="np. 14.49" />
           </div>
         </div>
 
-      <div id="modeSection" style="margin-top:12px">
-  <div class="row" id="modeRow">
-    <div id="endDateWrap">
-      <label>Data ostatniej raty <span class="muted">(wymagana dla trybu „niższa rata”)</span></label>
-      <input id="endDate" type="date" value="" />
-    </div>
-    <div id="modeWrap">
-      <label>Tryb nadpłaty</label>
-      <select id="mode">
-        <option value="shorten">Skrócenie okresu</option>
-        <option value="lower">Obniżenie raty</option>
-      </select>
-    </div>
-  </div>
+        <div class="row" style="margin-top:12px">
+          <div>
+            <label>Typ stopy</label>
+            <select id="rateType">
+              <option value="nominal">Nominalna (najczęściej w banku)</option>
+              <option value="effective">Efektywna</option>
+            </select>
+          </div>
+          <div>
+            <label>Miesięczna stopa modelowa</label>
+            <input id="monthlyRatePreview" type="text" disabled value="—" />
+          </div>
+        </div>
 
-  <p id="dateRangeHint" class="note hidden" style="margin:8px 0 0 0">Pozostały okres: —</p>
-</div>
+        <div class="mini-box" id="paymentCheckBox">
+          <div class="line">Rata modelowa: —</div>
+          <div class="line">Wpisana rata: —</div>
+          <div class="line">Różnica: —</div>
+        </div>
+
+        <div id="modeSection" style="margin-top:12px">
+          <div class="row" id="modeRow">
+            <div id="endDateWrap">
+              <label>Data ostatniej raty <span class="muted">(wymagana dla trybu „niższa rata”)</span></label>
+              <input id="endDate" type="date" value="" />
+            </div>
+            <div id="modeWrap">
+              <label>Tryb nadpłaty</label>
+              <select id="mode">
+                <option value="shorten">Skrócenie okresu</option>
+                <option value="lower">Obniżenie raty</option>
+              </select>
+            </div>
+          </div>
+
+          <p id="dateRangeHint" class="note hidden" style="margin:8px 0 0 0">Pozostały okres: —</p>
+        </div>
 
         <div class="row" style="margin-top:12px">
           <div>
@@ -120,7 +145,7 @@
         <p class="note" style="margin-top:10px">
           Tryb „skrócenie okresu”: rata podstawowa zostaje stała, nadpłaty skracają czas spłaty.<br>
           Tryb „obniżenie raty”: okres pozostaje stały, a rata jest przeliczana po każdej nadpłacie.
-          <span class="warn">Symulacja bankowa może różnić się detalami (zaokrąglenia, dni w miesiącu, moment przeliczenia).</span>
+          <span class="warn">Symulacja bankowa może różnić się detalami (zaokrąglenia, dni w miesiącu, moment przeliczenia, odsetki dzienne, dodatkowe koszty w racie).</span>
         </p>
       </div>
 
@@ -164,7 +189,9 @@ function fmt(n){
   return (isNaN(n) ? '—' : n.toLocaleString('pl-PL',{minimumFractionDigits:2,maximumFractionDigits:2})) + ' PLN';
 }
 function fmtN(n){ return isFinite(n) ? Math.round(n) : '—'; }
-function toMonthlyRate(rEff){ return Math.pow(1+rEff,1/12)-1; }
+function fmtPct(n){
+  return isFinite(n) ? (n*100).toLocaleString('pl-PL',{minimumFractionDigits:4,maximumFractionDigits:4}) + '%' : '—';
+}
 
 function parseDateInput(id){
   const v = document.getElementById(id).value;
@@ -173,34 +200,42 @@ function parseDateInput(id){
 
 function monthsBetweenInclusive(startDate, endDate){
   if (!startDate || !endDate) return null;
-
   const y1 = startDate.getFullYear();
   const m1 = startDate.getMonth();
   const y2 = endDate.getFullYear();
   const m2 = endDate.getMonth();
-
   const diff = (y2 - y1) * 12 + (m2 - m1);
   if (diff < 0) throw new Error('Data ostatniej raty nie może być wcześniejsza niż data pierwszej raty.');
-
   return diff + 1;
 }
 
-function hasMinimumInputs(){
-  const P = document.getElementById('P').value;
-  const PMT = document.getElementById('PMT').value;
-  const rEff = document.getElementById('rEff').value;
-  const mode = document.getElementById('mode').value;
-  const endDate = document.getElementById('endDate').value;
+function calcMonthlyRateFromInput(yearRatePct, rateType){
+  const annual = Number(yearRatePct) / 100;
+  if (!isFinite(annual)) return NaN;
+  if (annual < 0) return NaN;
 
-  if (String(P).trim() === '' || String(PMT).trim() === '' || String(rEff).trim() === '') return false;
-  if (mode === 'lower' && String(endDate).trim() === '') return false;
-  return true;
+  if (rateType === 'effective') {
+    return Math.pow(1 + annual, 1/12) - 1;
+  }
+  // nominalna (domyślnie): prosty podział przez 12
+  return annual / 12;
 }
 
 function calcAnnuityPayment(P, r, n){
   if (n <= 0) return 0;
   if (r === 0) return P / n;
   return P * r / (1 - Math.pow(1 + r, -n));
+}
+
+function hasMinimumInputs(){
+  const P = document.getElementById('P').value;
+  const PMT = document.getElementById('PMT').value;
+  const rYear = document.getElementById('rYear').value;
+  const mode = document.getElementById('mode').value;
+  const endDate = document.getElementById('endDate').value;
+  if (String(P).trim() === '' || String(PMT).trim() === '' || String(rYear).trim() === '') return false;
+  if (mode === 'lower' && String(endDate).trim() === '') return false;
+  return true;
 }
 
 function amortizeShorten({P, PMT, r, extra=0, lump=0, lumpMonth=1, maxMonths=480}){
@@ -223,16 +258,15 @@ function amortizeShorten({P, PMT, r, extra=0, lump=0, lumpMonth=1, maxMonths=480
     const paidNoLump = Math.min(desiredNoLump, maxNeededNoLump);
 
     if (paidNoLump <= interest + 1e-9){
-      throw new Error('Rata za mała względem oprocentowania. Zwiększ PMT lub zmniejsz stopę.');
+      throw new Error('Rata za mała względem oprocentowania. Zwiększ ratę lub sprawdź stopę.');
     }
 
-    const pmtPaid  = Math.min(PMT, paidNoLump);
+    const pmtPaid = Math.min(PMT, paidNoLump);
     const extraPaid = paidNoLump - pmtPaid;
     const principalNoLump = paidNoLump - interest;
     const endBal = Math.max(bal - principalNoLump - extraLump, 0);
 
     rows.push({ m, start, interest, pmt: pmtPaid, extra: extraPaid, extraLump, principal: principalNoLump, endBal });
-
     totalInt += interest;
     bal = endBal;
   }
@@ -315,8 +349,7 @@ function renderTable(rows, startDate){
     const tr = document.createElement('tr');
     const d = startDate ? addMonthsKeepDay(startDate, r.m-1) : null;
     const label = startDate ? `${r.m} # ${formatDate(d)}` : String(r.m);
-
-    const cells = [ label, r.start, r.interest, r.pmt, (r.extra + r.extraLump), (r.principal + r.extraLump), r.endBal ];
+    const cells = [label, r.start, r.interest, r.pmt, (r.extra + r.extraLump), (r.principal + r.extraLump), r.endBal];
 
     cells.forEach((v,i)=>{
       const td = document.createElement('td');
@@ -350,8 +383,10 @@ function toCSV(rows, startDate){
 function getInputs(){
   const P = parseFloat(document.getElementById('P').value || '0');
   const PMT = parseFloat(document.getElementById('PMT').value || '0');
-  const rEff = parseFloat(document.getElementById('rEff').value || '0') / 100;
-  const r = toMonthlyRate(rEff);
+
+  const rYear = parseFloat(document.getElementById('rYear').value || '0');
+  const rateType = document.getElementById('rateType').value;
+  const r = calcMonthlyRateFromInput(rYear, rateType);
 
   const startDate = parseDateInput('startDate');
   const endDate = parseDateInput('endDate');
@@ -364,7 +399,7 @@ function getInputs(){
   let remainingMonths = null;
   if (startDate && endDate) remainingMonths = monthsBetweenInclusive(startDate, endDate);
 
-  return {P, PMT, r, startDate, endDate, remainingMonths, mode, extra, lump, lumpMonth};
+  return {P, PMT, rYear, rateType, r, startDate, endDate, remainingMonths, mode, extra, lump, lumpMonth};
 }
 
 function enableExport(rows, startDate){
@@ -400,6 +435,85 @@ function updateModeUI(){
 
   updateDateRangeHint();
   updateLumpMonthHint();
+  updatePaymentCheckBox();
+}
+
+function updateMonthlyRatePreview(){
+  const rYearVal = parseFloat(document.getElementById('rYear').value || '');
+  const rateType = document.getElementById('rateType').value;
+  const monthly = calcMonthlyRateFromInput(rYearVal, rateType);
+
+  const field = document.getElementById('monthlyRatePreview');
+  if (!isFinite(monthly)) {
+    field.value = '—';
+    return;
+  }
+  field.value = fmtPct(monthly);
+}
+
+function updatePaymentCheckBox(){
+  const box = document.getElementById('paymentCheckBox');
+  const P = parseFloat(document.getElementById('P').value || '');
+  const PMT = parseFloat(document.getElementById('PMT').value || '');
+  const rYear = parseFloat(document.getElementById('rYear').value || '');
+  const rateType = document.getElementById('rateType').value;
+  const startDate = parseDateInput('startDate');
+  const endDate = parseDateInput('endDate');
+  const mode = document.getElementById('mode').value;
+  const r = calcMonthlyRateFromInput(rYear, rateType);
+
+  if (!isFinite(P) || !isFinite(PMT) || !isFinite(r) || P <= 0 || PMT <= 0 || r < 0) {
+    box.innerHTML = '<div class="line">Rata modelowa: —</div><div class="line">Wpisana rata: —</div><div class="line">Różnica: —</div>';
+    return;
+  }
+
+  let nModel = null;
+
+  if (mode === 'lower') {
+    if (startDate && endDate) {
+      try { nModel = monthsBetweenInclusive(startDate, endDate); } catch(_) {}
+    }
+  } else {
+    // Dla trybu skrócenia okresu wyliczamy modelowy okres z wpisanej raty (przybliżenie)
+    // n = -ln(1 - rP/PMT) / ln(1+r)
+    if (r === 0) {
+      nModel = Math.ceil(P / PMT);
+    } else {
+      const x = 1 - (r * P) / PMT;
+      if (x > 0) {
+        nModel = Math.ceil((-Math.log(x)) / Math.log(1 + r));
+      }
+    }
+  }
+
+  if (!isFinite(nModel) || nModel <= 0) {
+    box.innerHTML = `
+      <div class="line">Rata modelowa: —</div>
+      <div class="line">Wpisana rata: ${fmt(PMT)}</div>
+      <div class="line warn">Uzupełnij dane, aby porównać ratę modelową.</div>
+    `;
+    return;
+  }
+
+  const modelPmt = calcAnnuityPayment(P, r, nModel);
+  const diff = PMT - modelPmt;
+  const absDiff = Math.abs(diff);
+
+  let hint = '';
+  if (absDiff < 1.5) {
+    hint = '<span class="ok">Bardzo zbliżona do modelu.</span>';
+  } else if (absDiff < 10) {
+    hint = '<span class="warn">Niewielka różnica – to częste (zaokrąglenia / odsetki dzienne / daty rat).</span>';
+  } else {
+    hint = '<span class="warn">Większa różnica – to nadal może być normalne w banku (odsetki dzienne, inne zasady naliczania, dodatkowe koszty w racie).</span>';
+  }
+
+  box.innerHTML = `
+    <div class="line">Rata modelowa: <span class="ok">${fmt(modelPmt)}</span></div>
+    <div class="line">Wpisana rata: ${fmt(PMT)}</div>
+    <div class="line">Różnica: <span class="${diff >= 0 ? 'warn' : 'bad'}">${fmt(diff)}</span></div>
+    <div class="line">${hint}</div>
+  `;
 }
 
 function updateDateRangeHint(){
@@ -472,17 +586,19 @@ function updateLumpMonthHint(){
     return;
   }
 
-  // tryb skrócenia okresu – nie znamy limitu bez przeliczenia, ale walidujemy minimum
   hint.innerHTML = `Jednorazowa nadpłata w miesiącu <span class="ok">${lumpMonth}</span>. <span class="muted">(maksymalny zakres zależy od długości spłaty)</span>`;
 }
 
 function run(){
   if (!hasMinimumInputs()){
-    alert('Uzupełnij przynajmniej: Saldo początkowe, Ratę podstawową i Stopę roczną. Dla trybu „niższa rata” podaj datę ostatniej raty.');
+    alert('Uzupełnij przynajmniej: saldo początkowe, ratę podstawową i roczną stopę. Dla trybu „niższa rata” podaj też datę ostatniej raty.');
     return;
   }
 
   const {P, PMT, r, startDate, endDate, remainingMonths, mode, extra, lump, lumpMonth} = getInputs();
+
+  if (!isFinite(r)) throw new Error('Podaj poprawną roczną stopę procentową.');
+  if (r < 0) throw new Error('Stopa procentowa nie może być ujemna.');
 
   let base, result, modeLabel;
 
@@ -520,15 +636,17 @@ function run(){
   renderTable(result.rows, startDate);
   enableExport(result.rows, startDate);
 
-  // po przeliczeniu odśwież hinty (np. po zmianie wartości)
   updateDateRangeHint();
   updateLumpMonthHint();
+  updatePaymentCheckBox();
 }
 
 function clearAll(){
-  ['P','PMT','startDate','endDate','rEff','extra','lump'].forEach(id => document.getElementById(id).value = '');
+  ['P','PMT','startDate','endDate','rYear','extra','lump'].forEach(id => document.getElementById(id).value = '');
   document.getElementById('lumpMonth').value = '1';
   document.getElementById('mode').value = 'shorten';
+  document.getElementById('rateType').value = 'nominal';
+  document.getElementById('monthlyRatePreview').value = '—';
 
   ['kpiBaseN','kpiNewN','kpiSavedN','kpiBaseInt','kpiNewInt','kpiSavedInt','kpiMode','kpiFirstNewPmt']
     .forEach(id => document.getElementById(id).textContent = '—');
@@ -541,20 +659,29 @@ function clearAll(){
   updateModeUI();
   updateDateRangeHint();
   updateLumpMonthHint();
+  updatePaymentCheckBox();
 }
 
 document.getElementById('run').addEventListener('click', ()=>{ try{ run(); } catch(e){ alert(e.message); } });
 document.getElementById('reset').addEventListener('click', clearAll);
 
 document.getElementById('mode').addEventListener('change', updateModeUI);
-document.getElementById('startDate').addEventListener('change', () => { updateDateRangeHint(); updateLumpMonthHint(); });
-document.getElementById('endDate').addEventListener('change', () => { updateDateRangeHint(); updateLumpMonthHint(); });
+document.getElementById('rateType').addEventListener('change', () => { updateMonthlyRatePreview(); updatePaymentCheckBox(); });
+document.getElementById('rYear').addEventListener('input', () => { updateMonthlyRatePreview(); updatePaymentCheckBox(); });
+document.getElementById('P').addEventListener('input', updatePaymentCheckBox);
+document.getElementById('PMT').addEventListener('input', updatePaymentCheckBox);
+
+document.getElementById('startDate').addEventListener('change', () => { updateDateRangeHint(); updateLumpMonthHint(); updatePaymentCheckBox(); });
+document.getElementById('endDate').addEventListener('change', () => { updateDateRangeHint(); updateLumpMonthHint(); updatePaymentCheckBox(); });
+
 document.getElementById('lumpMonth').addEventListener('input', updateLumpMonthHint);
 document.getElementById('lump').addEventListener('input', updateLumpMonthHint);
 
 // start
+updateMonthlyRatePreview();
 updateModeUI();
 updateLumpMonthHint();
+updatePaymentCheckBox();
 </script>
 </body>
 </html>
